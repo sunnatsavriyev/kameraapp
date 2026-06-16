@@ -1,0 +1,55 @@
+# ─── Python / Django ───────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environment
+env/
+venv/
+.venv/
+ENV/
+
+# Environment variables (maxfiy ma'lumotlar)
+.env
+.env.*
+!.env.example
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── Frontend ────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Vite cache
+frontend/.vite/
+
+# ─── Test / coverage ───────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
