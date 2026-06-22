@@ -10,7 +10,7 @@ from .views import (
     MetalDetectorViewSet, MonitorViewSet, ComputerViewSet,
     NVRViewSet, SwitchViewSet, DeviceHistoryViewSet, Stationimage, get_me, run_migrations,
     CameraStreamViewSet, camera_live_snapshot, camera_discover_url,
-    SchemaCameraViewSet, schema_camera_live_snapshot
+    SchemaCameraViewSet, schema_camera_live_snapshot, sync_pull
 )
 
 router = DefaultRouter()
@@ -28,6 +28,7 @@ router.register(r'device-histories', DeviceHistoryViewSet, basename='device-hist
 
 urlpatterns = [
     path('api/get-me/', get_me, name='get_me'),
+    path('api/sync/pull/', sync_pull, name='sync_pull'),
     path('api/migrate/', run_migrations, name='run_migrations'),
     path('api/camera-streams/<int:pk>/live/', camera_live_snapshot, name='camera_live_snapshot'),
     path('api/camera-streams/<int:pk>/discover/', camera_discover_url, name='camera_discover_url'),

@@ -14,6 +14,11 @@ import re
 import time
 
 from .models import MetroLine, Station, Camera, CameraStream, SchemaCamera, MetalDetector, Monitor, Computer, NVR, Switch, DeviceHistory
+from .camera_connection import (
+    is_private_or_local_ip,
+    test_schema_camera_connection,
+    gen_mjpeg_frames,
+)
 from .pagination import CustomPagination
 from .serializers import (
     MetroLineSerializer, StationSerializer, CameraSerializer, CameraStreamSerializer,
@@ -30,6 +35,20 @@ def get_me(request):
         "username": request.user.username,
         "is_superuser": request.user.is_superuser,
         "email": request.user.email,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def sync_pull(request):
+    """Desktop Local Agent uchun metadata sync."""
+    from django.utils import timezone
+    stations = Station.objects.select_related('line').all()
+    schema_cameras = SchemaCamera.objects.select_related('station').all()
+    return Response({
+        'synced_at': timezone.now().isoformat(),
+        'stations': StationSerializer(stations, many=True, context={'request': request}).data,
+        'schema_cameras': SchemaCameraSerializer(schema_cameras, many=True).data,
     })
 
 
@@ -482,171 +501,6 @@ class CameraStreamViewSet(viewsets.ModelViewSet):
         return qs
 
 
-def _validate_camera_ip(ip):
-    parts = ip.split('.')
-    if len(parts) == 4 and all(part.isdigit() and 0 <= int(part) <= 255 for part in parts):
-        return True
-    return bool(re.match(r'^[a-zA-Z0-9.-]+$', ip) and len(ip) <= 253)
-
-
-def _try_schema_http_snapshot(ip, port, user, pwd, stream_path):
-    """HTTP orqali snapshot olish — muvaffaqiyat yoki xato turi."""
-    auth_failed = False
-
-    def _open(url, method='GET'):
-        nonlocal auth_failed
-        passman = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-        passman.add_password(None, url, user, pwd)
-        opener = urllib.request.build_opener(
-            urllib.request.HTTPBasicAuthHandler(passman),
-            urllib.request.HTTPDigestAuthHandler(passman),
-        )
-        req = urllib.request.Request(url, data=b'' if method == 'POST' else None, method=method)
-        req.add_header('User-Agent', 'Mozilla/5.0')
-        if method == 'POST':
-            req.add_header('Content-Type', 'application/x-www-form-urlencoded')
-            req.add_header('Accept', 'image/jpeg,*/*')
-        with opener.open(req, timeout=3.0) as resp:
-            content = resp.read()
-            content_type = resp.headers.get('Content-Type', '')
-            if content and (b'\xff\xd8' in content[:4] or 'image' in content_type):
-                return True, None
-        return False, None
-
-    hik_post_urls = [
-        f'http://{ip}:{port}/Streaming/channels/101/picture',
-        f'http://{ip}:{port}/Streaming/channels/1/picture',
-        f'http://{ip}:{port}/ISAPI/Streaming/channels/101/picture',
-        f'http://{ip}:{port}/ISAPI/Streaming/channels/1/picture',
-    ]
-    get_urls = [
-        f'http://{ip}:{port}{stream_path or ""}',
-        f'http://{ip}:{port}/cgi-bin/snapshot.cgi',
-        f'http://{ip}:{port}/cgi-bin/snapshot.cgi?channel=1&subtype=0',
-        f'http://{ip}:{port}/onvif/snapshot',
-        f'http://{ip}:{port}/onvif-http/snapshot',
-        f'http://{ip}:{port}/snapshot.jpg',
-        f'http://{ip}:{port}/image.jpg',
-    ]
-
-    for url in hik_post_urls:
-        try:
-            ok, _ = _open(url, method='POST')
-            if ok:
-                return True, None
-        except urllib.error.HTTPError as e:
-            if e.code in (401, 403):
-                auth_failed = True
-        except Exception:
-            pass
-
-    for url in get_urls:
-        if not url or url.endswith('//') or url == f'http://{ip}:{port}':
-            continue
-        try:
-            ok, _ = _open(url)
-            if ok:
-                return True, None
-        except urllib.error.HTTPError as e:
-            if e.code in (401, 403):
-                auth_failed = True
-        except Exception:
-            pass
-
-    if auth_failed:
-        return False, 'auth_failed'
-    return False, None
-
-
-def test_schema_camera_connection(ip_address, login, password, http_port=80, rtsp_port=554, stream_path=None):
-    """
-    SchemaCamera ulanishini tekshirish.
-    Qaytaradi: { ok, status, message }
-    status: live | no_ip | invalid_ip | unreachable | auth_failed | offline
-    """
-    ip = (ip_address or '').strip()
-    if not ip:
-        return {'ok': False, 'status': 'no_ip', 'message': "IP manzil kiritilmagan"}
-
-    if not _validate_camera_ip(ip):
-        return {
-            'ok': False,
-            'status': 'invalid_ip',
-            'message': "IP manzil noto'g'ri — to'g'ri format: 192.168.1.100",
-        }
-
-    if not (password or '').strip():
-        return {'ok': False, 'status': 'auth_failed', 'message': "Parol kiritilmagan"}
-
-    port = int(http_port or 80)
-    rtsp_port = int(rtsp_port or 554)
-    user = (login or 'admin').strip()
-    pwd = password or ''
-    path = stream_path or '/Streaming/Channels/101'
-
-    reachable = False
-    for check_port in {port, rtsp_port}:
-        try:
-            with socket.create_connection((ip, check_port), timeout=3.0):
-                reachable = True
-                break
-        except socket.timeout:
-            continue
-        except ConnectionRefusedError:
-            reachable = True
-            break
-        except OSError as e:
-            err_low = str(e).lower()
-            if 'unreachable' in err_low or 'no route' in err_low or 'network is unreachable' in err_low:
-                return {
-                    'ok': False,
-                    'status': 'unreachable',
-                    'message': "Bu IP manzilda kamera topilmadi — tarmoqda yo'q yoki IP xato",
-                }
-            continue
-
-    if not reachable:
-        return {
-            'ok': False,
-            'status': 'unreachable',
-            'message': "Kamera javob bermayapti — IP manzil mavjud emas yoki ishlamayapti",
-        }
-
-    # RTSP (OpenCV)
-    try:
-        import cv2
-        import os
-        os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;tcp'
-        rtsp_url = f'rtsp://{user}:{pwd}@{ip}:{rtsp_port}{path}'
-        cap = cv2.VideoCapture(rtsp_url)
-        if cap.isOpened():
-            ret = False
-            for _ in range(15):
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    cap.release()
-                    return {'ok': True, 'status': 'live', 'message': 'Kamera onlayn — jonli video mavjud'}
-                time.sleep(0.05)
-            cap.release()
-    except ImportError:
-        pass
-    except Exception:
-        pass
-
-    http_ok, http_err = _try_schema_http_snapshot(ip, port, user, pwd, path)
-    if http_ok:
-        return {'ok': True, 'status': 'live', 'message': 'Kamera onlayn — snapshot olinadi'}
-
-    if http_err == 'auth_failed':
-        return {'ok': False, 'status': 'auth_failed', 'message': "Login yoki parol noto'g'ri"}
-
-    return {
-        'ok': False,
-        'status': 'offline',
-        'message': "Kamera ishlamayapti — ulanish bor, lekin video olinmadi (LIVE emas)",
-    }
-
-
 class SchemaCameraViewSet(viewsets.ModelViewSet):
     """
     Bekat sxemasidagi mustaqil kameralar.
@@ -665,6 +519,18 @@ class SchemaCameraViewSet(viewsets.ModelViewSet):
         if station_id:
             qs = qs.filter(station_id=station_id)
         return qs
+
+    def perform_create(self, serializer):
+        ip = (serializer.validated_data.get('ip_address') or '').strip()
+        serializer.save(is_local_only=is_private_or_local_ip(ip) if ip else False)
+
+    def perform_update(self, serializer):
+        ip = (
+            serializer.validated_data.get('ip_address')
+            or serializer.instance.ip_address
+            or ''
+        ).strip()
+        serializer.save(is_local_only=is_private_or_local_ip(ip) if ip else False)
 
     @action(detail=False, methods=['post'], url_path='test-connection')
     def test_connection(self, request):
@@ -698,7 +564,8 @@ class SchemaCameraViewSet(viewsets.ModelViewSet):
             stream_path = data.get('stream_path')
 
         result = test_schema_camera_connection(
-            ip, login, password, http_port, rtsp_port, stream_path
+            ip, login, password, http_port, rtsp_port, stream_path,
+            quick=bool(data.get('quick')),
         )
         return Response(result)
 

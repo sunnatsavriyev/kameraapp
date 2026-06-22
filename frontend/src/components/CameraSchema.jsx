@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { API_BASE_URL } from "../config";
+import { API_BASE_URL, LOCAL_AGENT_URL, IS_DESKTOP_MODE } from "../config";
 import {
   formatCameraNumber,
   getConnectionLabel,
@@ -9,6 +9,8 @@ import {
   shouldBlockCameraSave,
   getBlockedSaveMessage,
 } from "../translations";
+import { isLocalNetworkIp, isLocalAgentAvailable, pickConnectionApiBase } from "../utils/network";
+import { resolveStreamMode, getSchemaLiveUrl, canShowLiveStream } from "../utils/stream";
 import {
   Cctv, CirclePlus, PencilLine, Eye, EyeOff, Wifi, WifiOff, Copy,
   ExternalLink, X, Save, CircleCheck, Loader,
@@ -17,28 +19,57 @@ import {
   FileImage, Hash, ZoomIn
 } from "lucide-react";
 
-async function testSchemaCameraConnection(token, payload, t) {
-  try {
-    const resp = await fetch(`${API_BASE_URL}/api/schema-cameras/test-connection/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      return localizeConnectionResult(t, {
+async function testSchemaCameraConnection(token, payload, t, agentAvailable = false, options = {}) {
+  const { quick = false, timeoutMs = quick ? 12000 : 35000 } = options;
+  const body = quick ? { ...payload, quick: true } : payload;
+  const agentBase = pickConnectionApiBase(payload.ip_address, agentAvailable);
+  const bases = agentBase ? [agentBase, API_BASE_URL] : [API_BASE_URL];
+  let last = null;
+  for (const base of bases) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await fetch(`${base}/api/schema-cameras/test-connection/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        last = localizeConnectionResult(t, {
+          ok: false,
+          status: data.status || "error",
+          message: data.message,
+        });
+        continue;
+      }
+      const result = localizeConnectionResult(t, data);
+      if (base === agentBase && result.ok) return result;
+      if (result.status === "local_only" && agentBase && base === API_BASE_URL) continue;
+      if (result.status === "local_only" && !agentAvailable && isLocalNetworkIp(payload.ip_address)) {
+        return localizeConnectionResult(t, {
+          ...result,
+          ok: false,
+          message: t.localAgentRequired,
+        });
+      }
+      return result;
+    } catch (err) {
+      clearTimeout(timer);
+      const timedOut = err?.name === "AbortError";
+      last = localizeConnectionResult(t, {
         ok: false,
-        status: data.status || "error",
-        message: data.message,
+        status: timedOut ? "offline" : "error",
+        message: timedOut ? t.connTimeout : t.connServerError,
       });
     }
-    return localizeConnectionResult(t, data);
-  } catch {
-    return localizeConnectionResult(t, { ok: false, status: "error", message: t.connServerError });
   }
+  return last || localizeConnectionResult(t, { ok: false, status: "error", message: t.connServerError });
 }
 
 function ConnectionBadge({ status, checking, compact, t }) {
@@ -139,9 +170,22 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [connectionChecking, setConnectionChecking] = useState(false);
   const [streamAllowed, setStreamAllowed] = useState(false);
+  const [localAgentAvailable, setLocalAgentAvailable] = useState(false);
   const [savedCam, setSavedCam] = useState(cam);
 
   const isNew = !savedCam?.id;
+
+  useEffect(() => {
+    isLocalAgentAvailable().then(setLocalAgentAvailable);
+    const timer = setInterval(() => isLocalAgentAvailable(true).then(setLocalAgentAvailable), 12000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (isLocalNetworkIp(fields.ip_address)) {
+      setDirectConnect(!localAgentAvailable);
+    }
+  }, [fields.ip_address, localAgentAvailable]);
 
   useEffect(() => {
     setSavedCam(cam);
@@ -174,11 +218,14 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
       stream_path: f.stream_path,
     };
     if (savedCam?.id) payload.id = savedCam.id;
-    const result = await testSchemaCameraConnection(token, payload, t);
+    const agentOk = localAgentAvailable || await isLocalAgentAvailable(true);
+    setLocalAgentAvailable(agentOk);
+    const result = await testSchemaCameraConnection(token, payload, t, agentOk);
     setConnectionStatus(result);
+    setStreamAllowed(canShowLiveStream({ connectionStatus: result, localAgentAvailable: agentOk, ip: f.ip_address }));
     setConnectionChecking(false);
     return result;
-  }, [fields, savedCam?.id, token, t]);
+  }, [fields, savedCam?.id, token, t, localAgentAvailable]);
 
   useEffect(() => {
     if (tab !== "view" || isNew || !savedCam?.id) return;
@@ -186,7 +233,11 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
     (async () => {
       const result = await runConnectionTest();
       if (cancelled) return;
-      setStreamAllowed(result.ok);
+      setStreamAllowed(canShowLiveStream({
+        connectionStatus: result,
+        localAgentAvailable,
+        ip: fields.ip_address,
+      }) || result.ok);
       if (!result.ok) {
         setImgError(true);
         setInitialLoading(false);
@@ -309,9 +360,21 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
     setShowDeleteConfirm(true);
   };
 
-  const liveUrl = directConnect
-    ? `http://${fields.ip_address}:${fields.http_port}${directPath}?t=${tick}`
-    : `${API_BASE_URL}/api/schema-cameras/${savedCam?.id}/live/?token=${token}`;
+  const streamMode = resolveStreamMode({
+    ip: fields.ip_address,
+    localAgentAvailable,
+    connectionStatus,
+    isLocalOnly: savedCam?.is_local_only,
+  });
+
+  const liveUrl = getSchemaLiveUrl({
+    camId: savedCam?.id,
+    fields,
+    token,
+    mode: directConnect ? "direct" : streamMode,
+    directPath,
+    tick,
+  });
 
   const headerStatus = connectionChecking
     ? "checking"
@@ -511,6 +574,15 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
               </div>
 
               {/* Mode toggle */}
+              {localAgentAvailable && isLocalNetworkIp(fields.ip_address) ? (
+                <div style={{
+                  padding: "0.6rem 0.75rem", borderRadius: "0.5rem", fontSize: "0.75rem", fontWeight: 600,
+                  background: "rgba(34, 197, 94, 0.1)", border: "1px solid rgba(34, 197, 94, 0.25)",
+                  color: "var(--text-primary)",
+                }}>
+                  {t.connectViaLocalAgent}
+                </div>
+              ) : (
               <div style={{
                 display: "flex", gap: "0.5rem", background: "var(--bg-tertiary)",
                 padding: "3px", borderRadius: "0.5rem", border: "1px solid var(--border-color)"
@@ -521,7 +593,7 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
                   background: !directConnect ? "var(--bg-primary)" : "transparent",
                   color: !directConnect ? "var(--accent-color)" : "var(--text-secondary)",
                   boxShadow: !directConnect ? "0 1px 3px rgba(0,0,0,0.2)" : "none", transition: "all 0.15s"
-                }}>{t.connectViaServer}</button>
+                }}>{IS_DESKTOP_MODE ? t.connectViaLocalAgent : t.connectViaServer}</button>
                 <button type="button" onClick={() => setDirectConnect(true)} style={{
                   flex: 1, padding: "6px", fontSize: "0.75rem", fontWeight: 600,
                   borderRadius: "0.35rem", border: "none", cursor: "pointer",
@@ -530,8 +602,9 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
                   boxShadow: directConnect ? "0 1px 3px rgba(0,0,0,0.2)" : "none", transition: "all 0.15s"
                 }}>{t.connectViaBrowser}</button>
               </div>
+              )}
 
-              {directConnect && (
+              {directConnect && !(localAgentAvailable && isLocalNetworkIp(fields.ip_address)) && (
                 <div style={{
                   padding: "0.75rem", borderRadius: "0.5rem",
                   background: "rgba(37, 99, 235, 0.05)", border: "1px solid rgba(37, 99, 235, 0.15)",
@@ -957,23 +1030,38 @@ function ImageUploadModal({ station, token, t, onClose, onUploaded, showNotifica
 function SchemaLiveViewer({ cam, token, t, onClose }) {
   const [tick, setTick] = useState(0);
   const [connection, setConnection] = useState({ checking: true });
+  const [localAgentAvailable, setLocalAgentAvailable] = useState(false);
+
+  useEffect(() => {
+    isLocalAgentAvailable().then(setLocalAgentAvailable);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const result = await testSchemaCameraConnection(token, { id: cam.id }, t);
+      const agentOk = await isLocalAgentAvailable(true);
+      if (!cancelled) setLocalAgentAvailable(agentOk);
+      const result = await testSchemaCameraConnection(
+        token,
+        { id: cam.id, ip_address: cam.ip_address },
+        t,
+        agentOk
+      );
       if (!cancelled) setConnection({ checking: false, ...result });
     })();
     return () => { cancelled = true; };
-  }, [cam.id, token, t]);
+  }, [cam.id, cam.ip_address, token, t]);
 
   useEffect(() => {
-    if (!connection.ok) return;
+    const canStream = connection.ok || connection.status === "local_only";
+    if (!canStream) return;
     const interval = setInterval(() => setTick((prev) => prev + 1), 800);
     return () => clearInterval(interval);
-  }, [connection.ok, cam?.id]);
+  }, [connection.ok, connection.status, cam?.id]);
 
   if (!cam?.id) return null;
+
+  const canStream = connection.ok || connection.status === "local_only";
 
   if (connection.checking) {
     return createPortal(
@@ -989,7 +1077,7 @@ function SchemaLiveViewer({ cam, token, t, onClose }) {
     );
   }
 
-  if (!connection.ok) {
+  if (!canStream) {
     return createPortal(
       <div style={{
         position: "fixed", inset: 0, zIndex: 10000,
@@ -1019,7 +1107,19 @@ function SchemaLiveViewer({ cam, token, t, onClose }) {
     );
   }
 
-  const liveUrl = `${API_BASE_URL}/api/schema-cameras/${cam.id}/live/?token=${token}&t=${tick}`;
+  const streamMode = resolveStreamMode({
+    ip: cam.ip_address,
+    localAgentAvailable,
+    connectionStatus: connection,
+    isLocalOnly: cam.is_local_only,
+  });
+  const liveUrl = getSchemaLiveUrl({
+    camId: cam.id,
+    fields: cam,
+    token,
+    mode: streamMode,
+    tick,
+  }) || `${API_BASE_URL}/api/schema-cameras/${cam.id}/live/?token=${token}&t=${tick}`;
 
   return (
     <InteractiveMediaViewer
@@ -1605,13 +1705,25 @@ export default function CameraSchema({ station, token, t, showNotification, onRe
     });
     setConnectionMap((prev) => ({ ...prev, ...checking }));
 
-    const results = await Promise.all(
-      cameras.map(async (cam) => {
-        const result = await testSchemaCameraConnection(token, { id: cam.id }, t);
-        return [cam.id, result];
-      })
-    );
-    setConnectionMap(Object.fromEntries(results));
+    const agentOk = await isLocalAgentAvailable(true);
+    cameras.forEach((cam) => {
+      testSchemaCameraConnection(
+        token,
+        { id: cam.id, ip_address: cam.ip_address },
+        t,
+        agentOk,
+        { quick: true, timeoutMs: 12000 }
+      )
+        .then((result) => {
+          setConnectionMap((prev) => ({ ...prev, [cam.id]: result }));
+        })
+        .catch(() => {
+          setConnectionMap((prev) => ({
+            ...prev,
+            [cam.id]: localizeConnectionResult(t, { ok: false, status: "error", message: t.connServerError }),
+          }));
+        });
+    });
   }, [token, t]);
 
   const fetchSchemaCameras = useCallback(async () => {
@@ -1647,12 +1759,13 @@ export default function CameraSchema({ station, token, t, showNotification, onRe
 
   const handlePinClick = (cam) => {
     const conn = connectionMap[cam.id];
-    if (conn?.ok === false) {
+    const canLive = conn?.ok === true || conn?.status === "local_only";
+    if (conn?.ok === false && conn?.status !== "local_only") {
       showNotification("warning", t.liveNoVideo, conn.message);
       openCameraModal(cam, "view");
       return;
     }
-    if (conn?.ok !== true) {
+    if (!canLive) {
       showNotification("info", t.checkingTitle, t.checkingWait);
       return;
     }
@@ -1749,6 +1862,8 @@ export default function CameraSchema({ station, token, t, showNotification, onRe
       showNotification("success", t.title, t.cameraDeleted);
     } else if (connectionResult?.ok) {
       showNotification("success", t.title, t.cameraSavedLiveMsg);
+    } else if (connectionResult?.status === "local_only") {
+      showNotification("success", t.title, t.connMsgLocalOnly);
     } else if (connectionResult?.status === "offline") {
       showNotification("warning", t.title, t.cameraSavedOfflineMsg);
     } else if (connectionResult) {

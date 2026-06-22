@@ -9,7 +9,8 @@ import {
 import MetroMap from "./components/MetroMap";
 import StationDetail from "./components/StationDetail";
 import { translations } from "./translations";
-import { API_BASE_URL } from "./config";
+import { API_BASE_URL, IS_DESKTOP_MODE } from "./config";
+import { isLocalAgentAvailable, syncFromServer } from "./utils/network";
 import logoImg from "./logo.png";
 
 const formatCompact = (n) => {
@@ -148,6 +149,9 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [localAgentOk, setLocalAgentOk] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const syncOnLoginRef = useRef(false);
   const settingsBtnRef = useRef(null);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
 
@@ -359,10 +363,41 @@ export default function App() {
     localStorage.removeItem("token_marketing");
     localStorage.removeItem("active_page");
     localStorage.removeItem("selected_station_id");
+    syncOnLoginRef.current = false;
     setToken(null);
     setCurrentUser(null);
     setSelectedStationId(null);
     setActivePage("map");
+  };
+
+  useEffect(() => {
+    if (!token) return;
+    isLocalAgentAvailable().then(setLocalAgentOk);
+    const timer = setInterval(() => isLocalAgentAvailable(true).then(setLocalAgentOk), 15000);
+    return () => clearInterval(timer);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      syncOnLoginRef.current = false;
+      return;
+    }
+    if (!localAgentOk || !IS_DESKTOP_MODE || syncOnLoginRef.current) return;
+    syncOnLoginRef.current = true;
+    syncFromServer(token).catch(() => {});
+  }, [token, localAgentOk]);
+
+  const handleSyncFromServer = async () => {
+    if (!token || !localAgentOk) return;
+    setSyncing(true);
+    try {
+      await syncFromServer(token);
+      showNotification("success", t.title, t.syncSuccess);
+    } catch {
+      showNotification("error", t.errorTitle, t.syncFailed);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   useEffect(() => {
@@ -634,6 +669,17 @@ export default function App() {
       {/* Main Content Area */}
       <main className="main-content">
         <div className="main-content-pattern" aria-hidden="true" />
+        {(localAgentOk || IS_DESKTOP_MODE) && (
+          <div className="local-agent-banner">
+            <span className="local-agent-dot" />
+            <span>{localAgentOk ? t.localAgentActive : t.localAgentInactive}</span>
+            {localAgentOk && (
+              <button type="button" className="btn btn-secondary btn-sm" disabled={syncing} onClick={handleSyncFromServer}>
+                {syncing ? t.loading : t.syncFromServer}
+              </button>
+            )}
+          </div>
+        )}
         <div className={`page-content ${activePage === "map" ? "page-content--map" : ""}`}>
 
           {/* Map Page */}

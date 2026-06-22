@@ -188,6 +188,11 @@ class SchemaCamera(models.Model):
         default=True,
         verbose_name="Faol"
     )
+    is_local_only = models.BooleanField(
+        default=False,
+        verbose_name="Faqat lokal tarmoq",
+        help_text="Lokal IP — stream stansiya PC (Local Agent) orqali"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

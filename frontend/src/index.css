@@ -255,6 +255,27 @@ body::after {
 .animate-scale-in  { animation: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 .animate-slide-right { animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
+.local-agent-banner {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.45rem 1.25rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  background: rgba(16, 185, 129, 0.08);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.local-agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
 /* ===========================
    APP SHELL
 =========================== */

@@ -31,7 +31,7 @@ class SchemaCameraSerializer(serializers.ModelSerializer):
             'id', 'station', 'position_number', 'label',
             'ip_address', 'login', 'password',
             'rtsp_port', 'http_port', 'stream_path',
-            'pos_x', 'pos_y', 'direction', 'is_active',
+            'pos_x', 'pos_y', 'direction', 'is_active', 'is_local_only',
             'rtsp_url', 'created_at', 'updated_at'
         ]
         extra_kwargs = {
