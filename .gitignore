@@ -1,3 +1,6 @@
+# ─── Local Agent ───────────────────────────────────────────
+local_agent/data/sync_cache.json
+
 # ─── Python / Django ───────────────────────────────────────
 __pycache__/
 *.py[cod]
@@ -16,10 +19,10 @@ venv/
 .venv/
 ENV/
 
-# Environment variables (maxfiy ma'lumotlar — hammasi gitga kirmaydi)
+# Environment variables (maxfiy ma'lumotlar)
 .env
 .env.*
-.env.example
+!.env.example
 
 # Django
 *.log
@@ -43,7 +46,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.env
 frontend/.env.*
-frontend/.env.example
+!frontend/.env.example
 
 # Vite cache
 frontend/.vite/
