@@ -1,4 +1,5 @@
 import { LOCAL_AGENT_URL } from "../config";
+import { useLocalAgentForIp } from "./cameraMode";
 
 /** Lokal tarmoq IP — serverdan to'g'ridan ulanmaydi */
 export function isLocalNetworkIp(ip) {
@@ -42,6 +43,6 @@ export async function syncFromServer(token) {
 }
 
 export function pickConnectionApiBase(ip, agentAvailable) {
-  if (isLocalNetworkIp(ip) && agentAvailable) return LOCAL_AGENT_URL;
+  if (useLocalAgentForIp(ip, agentAvailable)) return LOCAL_AGENT_URL;
   return null;
 }

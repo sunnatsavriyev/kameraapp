@@ -98,6 +98,7 @@ def _try_http_snapshot(ip, port, user, pwd, stream_path, *, timeout=3.0, quick=F
         f'http://{ip}:{port}/image.jpg',
     ]
 
+    hik_got_401 = False
     for url in hik_post_urls:
         try:
             ok, _ = _open(url, method='POST')
@@ -105,7 +106,7 @@ def _try_http_snapshot(ip, port, user, pwd, stream_path, *, timeout=3.0, quick=F
                 return True, None
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                auth_failed = True
+                hik_got_401 = True
         except Exception:
             pass
 
@@ -117,11 +118,13 @@ def _try_http_snapshot(ip, port, user, pwd, stream_path, *, timeout=3.0, quick=F
             if ok:
                 return True, None
         except urllib.error.HTTPError as e:
-            if e.code in (401, 403):
+            if e.code in (401, 403) and not quick:
                 auth_failed = True
         except Exception:
             pass
 
+    if hik_got_401:
+        return False, 'auth_failed'
     if auth_failed:
         return False, 'auth_failed'
     return False, None
@@ -216,13 +219,18 @@ def _test_http_live(ip, user, pwd, ports, path):
 
 
 def _quick_camera_check(ip, user, pwd, http_port, rtsp_port, stream_path, *, from_local_agent, is_local_ip):
-    """Ro'yxat uchun tez tekshiruv — ~5 soniya ichida."""
+    """Ro'yxat uchun tez tekshiruv — ~8 soniya ichida."""
     port = int(http_port or 80)
     rtsp_port = int(rtsp_port or 554)
     path = stream_path or '/Streaming/Channels/101'
 
     if not from_local_agent and is_local_ip:
         return _local_only_result()
+
+    # RTSP — Hikvision/Dahua uchun eng ishonchli tez test
+    rtsp_result = _test_rtsp_live(ip, user, pwd, rtsp_port, path)
+    if rtsp_result:
+        return rtsp_result
 
     ports = [port, rtsp_port, 8000, 8080] if from_local_agent else [port, rtsp_port]
     seen = []

@@ -1,9 +1,10 @@
 import { API_BASE_URL, LOCAL_AGENT_URL } from "../config";
 import { isLocalNetworkIp } from "./network";
+import { useLocalAgentForIp } from "./cameraMode";
 
 export function resolveStreamMode({ ip, localAgentAvailable, connectionStatus, isLocalOnly }) {
   const local = isLocalNetworkIp(ip) || isLocalOnly || connectionStatus?.status === "local_only";
-  if (local && localAgentAvailable) return "local_agent";
+  if (useLocalAgentForIp(ip, localAgentAvailable)) return "local_agent";
   if (local) return "direct";
   return "server";
 }
@@ -40,10 +41,12 @@ export function getSchemaLiveUrl({
   return null;
 }
 
+import { useLocalAgentForIp } from "./cameraMode";
+
 export function canShowLiveStream({ connectionStatus, localAgentAvailable, ip }) {
   if (connectionStatus?.ok) return true;
   if (connectionStatus?.status === "local_only") {
-    return localAgentAvailable || isLocalNetworkIp(ip);
+    return useLocalAgentForIp(ip, localAgentAvailable);
   }
   return false;
 }

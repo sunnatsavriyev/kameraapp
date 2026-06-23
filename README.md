@@ -5,6 +5,13 @@ Toshkent Metropoliteni kameralar nazorat tizimi — **stansiya kompyuterida** is
 - **88.88.x.x** kameralar — online server orqali (`http://88.88.0.151:8090`)
 - **192.168.x.x** va boshqa lokal IP — **Local Agent** orqali (faqat kamera bilan bir tarmoqda)
 
+## Rejimlar
+
+| Rejim | Ishga tushirish | 88.88.x.x | 192.168.x.x |
+|-------|-----------------|-----------|-------------|
+| **Desktop** | `start-desktop.bat` | Server orqali (proxy) | Local Agent (bir tarmoq) |
+| **Online** | Server brauzeri | Server to'g'ridan | Faqat "lokal" deb ko'rsatiladi |
+
 ## Tez boshlash (Windows)
 
 ```powershell

@@ -10,6 +10,7 @@ import {
   getBlockedSaveMessage,
 } from "../translations";
 import { isLocalNetworkIp, isLocalAgentAvailable, pickConnectionApiBase } from "../utils/network";
+import { getConnectionTestOptions } from "../utils/cameraMode";
 import { resolveStreamMode, getSchemaLiveUrl, canShowLiveStream } from "../utils/stream";
 import {
   Cctv, CirclePlus, PencilLine, Eye, EyeOff, Wifi, WifiOff, Copy,
@@ -176,6 +177,7 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
   const isNew = !savedCam?.id;
 
   useEffect(() => {
+    if (!IS_DESKTOP_MODE) return;
     isLocalAgentAvailable().then(setLocalAgentAvailable);
     const timer = setInterval(() => isLocalAgentAvailable(true).then(setLocalAgentAvailable), 12000);
     return () => clearInterval(timer);
@@ -218,7 +220,7 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
       stream_path: f.stream_path,
     };
     if (savedCam?.id) payload.id = savedCam.id;
-    const agentOk = localAgentAvailable || await isLocalAgentAvailable(true);
+    const agentOk = IS_DESKTOP_MODE && (localAgentAvailable || await isLocalAgentAvailable(true));
     setLocalAgentAvailable(agentOk);
     const result = await testSchemaCameraConnection(token, payload, t, agentOk);
     setConnectionStatus(result);
@@ -574,7 +576,7 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
               </div>
 
               {/* Mode toggle */}
-              {localAgentAvailable && isLocalNetworkIp(fields.ip_address) ? (
+              {IS_DESKTOP_MODE && localAgentAvailable && isLocalNetworkIp(fields.ip_address) ? (
                 <div style={{
                   padding: "0.6rem 0.75rem", borderRadius: "0.5rem", fontSize: "0.75rem", fontWeight: 600,
                   background: "rgba(34, 197, 94, 0.1)", border: "1px solid rgba(34, 197, 94, 0.25)",
@@ -604,7 +606,7 @@ function SchemaCameraModal({ cam, stationId, token, t, onClose, onSave, clickedC
               </div>
               )}
 
-              {directConnect && !(localAgentAvailable && isLocalNetworkIp(fields.ip_address)) && (
+              {directConnect && !(IS_DESKTOP_MODE && localAgentAvailable && isLocalNetworkIp(fields.ip_address)) && (
                 <div style={{
                   padding: "0.75rem", borderRadius: "0.5rem",
                   background: "rgba(37, 99, 235, 0.05)", border: "1px solid rgba(37, 99, 235, 0.15)",
@@ -1033,13 +1035,14 @@ function SchemaLiveViewer({ cam, token, t, onClose }) {
   const [localAgentAvailable, setLocalAgentAvailable] = useState(false);
 
   useEffect(() => {
+    if (!IS_DESKTOP_MODE) return;
     isLocalAgentAvailable().then(setLocalAgentAvailable);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const agentOk = await isLocalAgentAvailable(true);
+      const agentOk = IS_DESKTOP_MODE && (await isLocalAgentAvailable(true));
       if (!cancelled) setLocalAgentAvailable(agentOk);
       const result = await testSchemaCameraConnection(
         token,
@@ -1705,14 +1708,15 @@ export default function CameraSchema({ station, token, t, showNotification, onRe
     });
     setConnectionMap((prev) => ({ ...prev, ...checking }));
 
-    const agentOk = await isLocalAgentAvailable(true);
+    const agentOk = IS_DESKTOP_MODE ? await isLocalAgentAvailable(true) : false;
     cameras.forEach((cam) => {
+      const opts = getConnectionTestOptions(cam.ip_address);
       testSchemaCameraConnection(
         token,
         { id: cam.id, ip_address: cam.ip_address },
         t,
-        agentOk,
-        { quick: true, timeoutMs: 12000 }
+        opts.viaAgent && agentOk,
+        { quick: opts.quick, timeoutMs: opts.timeoutMs }
       )
         .then((result) => {
           setConnectionMap((prev) => ({ ...prev, [cam.id]: result }));

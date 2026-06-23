@@ -10,6 +10,13 @@ Stansiya kompyuterida **192.168**, **10.x**, **11.x**, **22.x** kabi lokal IP li
 | **Local Agent** (`127.0.0.1:8765`) | Lokal kameralarga RTSP/HTTP ulanish |
 | **Frontend** (brauzer/desktop) | UI — avtomatik agent/server tanlaydi |
 
+## Rejimlar
+
+| | Desktop (`start-desktop.bat`) | Online (server brauzeri) |
+|--|------------------------------|--------------------------|
+| **88.x** | Server orqali video | Server orqali video |
+| **192.x** | Local Agent orqali video | Ko'rinmaydi (lokal) |
+
 ## 1. O'rnatish
 
 ```powershell

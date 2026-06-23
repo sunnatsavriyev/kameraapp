@@ -540,9 +540,8 @@ class SchemaCameraViewSet(viewsets.ModelViewSet):
         Body: { id } yoki { ip_address, login, password, http_port, rtsp_port, stream_path }
         """
         data = request.data
-        ip = (data.get('ip_address') or '').strip()
-
-        if not ip and data.get('id'):
+        cam = None
+        if data.get('id'):
             try:
                 cam = SchemaCamera.objects.get(pk=data['id'])
             except SchemaCamera.DoesNotExist:
@@ -550,18 +549,27 @@ class SchemaCameraViewSet(viewsets.ModelViewSet):
                     {'ok': False, 'status': 'not_found', 'message': 'Kamera topilmadi'},
                     status=404,
                 )
-            ip = cam.ip_address
-            login = data.get('login', cam.login)
-            password = data.get('password', cam.password)
+
+        if cam:
+            ip = (data.get('ip_address') or cam.ip_address or '').strip()
+            login = data.get('login') or cam.login
+            password = data.get('password') if data.get('password') not in (None, '') else cam.password
             http_port = data.get('http_port', cam.http_port)
             rtsp_port = data.get('rtsp_port', cam.rtsp_port)
             stream_path = data.get('stream_path', cam.stream_path)
         else:
+            ip = (data.get('ip_address') or '').strip()
             login = data.get('login', 'admin')
             password = data.get('password', '')
             http_port = data.get('http_port', 80)
             rtsp_port = data.get('rtsp_port', 554)
             stream_path = data.get('stream_path')
+
+        if not ip:
+            return Response(
+                {'ok': False, 'status': 'no_ip', 'message': 'IP manzil kiritilmagan'},
+                status=400,
+            )
 
         result = test_schema_camera_connection(
             ip, login, password, http_port, rtsp_port, stream_path,
