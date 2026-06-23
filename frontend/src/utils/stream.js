@@ -1,4 +1,4 @@
-import { API_BASE_URL, LOCAL_AGENT_URL } from "../config";
+import { API_BASE_URL, LOCAL_AGENT_URL, SERVER_API_URL } from "../config";
 import { isLocalNetworkIp } from "./network";
 import { useLocalAgentForIp } from "./cameraMode";
 
@@ -36,7 +36,7 @@ export function getSchemaLiveUrl({
     return `http://${ip}:${httpPort}${directPath}?t=${tick}`;
   }
   if (camId && token) {
-    return `${API_BASE_URL}/api/schema-cameras/${camId}/live/?token=${token}&t=${tick}`;
+    return `${SERVER_API_URL}/api/schema-cameras/${camId}/live/?token=${token}&t=${tick}`;
   }
   return null;
 }

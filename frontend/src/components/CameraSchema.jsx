@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { API_BASE_URL, LOCAL_AGENT_URL, IS_DESKTOP_MODE } from "../config";
+import { API_BASE_URL, LOCAL_AGENT_URL, IS_DESKTOP_MODE, SERVER_API_URL } from "../config";
 import {
   formatCameraNumber,
   getConnectionLabel,
@@ -1122,7 +1122,7 @@ function SchemaLiveViewer({ cam, token, t, onClose }) {
     token,
     mode: streamMode,
     tick,
-  }) || `${API_BASE_URL}/api/schema-cameras/${cam.id}/live/?token=${token}&t=${tick}`;
+  }) || `${SERVER_API_URL}/api/schema-cameras/${cam.id}/live/?token=${token}&t=${tick}`;
 
   return (
     <InteractiveMediaViewer
